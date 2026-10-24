@@ -1,23 +1,30 @@
 [project]
-name = "video-use"
+name = "kidsafe"
 version = "0.1.0"
-description = "Conversation-driven video editor skill for Claude Code"
+description = "Fast, lossless cutting of unsafe scenes from cartoons for ages 3+. No blurring, no re-encoding."
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "requests",
-    "librosa",
-    "matplotlib",
+    "httpx",
     "pillow",
-    "numpy",
+    "pyyaml",
+    "jsonschema",
+    "flask",
 ]
+requires-dist = []
 
 [project.optional-dependencies]
-animations = ["manim"]
+test = ["pytest"]
+
+[project.scripts]
+kidsafe = "kidsafe.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = []
+packages = ["kidsafe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

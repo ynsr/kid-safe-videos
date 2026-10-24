@@ -1,0 +1,47 @@
+version: 1
+target_age: 3
+family_values:
+  allowed_certifications: [TV-Y, TV-Y7, G]
+  review_certifications: [PG, TV-PG]
+  excluded_certifications: [PG-13, R, TV-14, TV-MA, NC-17]
+  excluded_genres: [Horror, Adult, Erotic]
+  excluded_keywords: []
+  romance_policy: cut
+  horror_policy: cut
+  violence_policy: cut
+  theme_exclusions: []
+  thresholds:
+    max_percent_removed: 15
+    max_cuts_per_10min: 3
+    max_romance_scene_fraction: 0.10
+    max_single_cut_seconds: 180
+    min_keep_gap_seconds: 8
+categories:
+  romantic_affection:
+    priority: 1
+    severity: high
+    enabled: true
+    description: "Romantic interaction between male and female characters: kissing, romantic embrace, love/attraction signals, romantic closeness, first-meeting attraction moments (e.g. Tarzan and Jane's first meeting)."
+    not_flagged: [parent-child affection, friendship hugs, animal affection]
+  mature_themes:
+    priority: 1
+    severity: high
+    enabled: true
+  revealing_clothing:
+    priority: 1
+    severity: high
+    enabled: true
+  violence_or_scary_imagery:
+    priority: 2
+    severity: medium
+    enabled: true
+  harsh_audio:
+    enabled: false
+pipeline:
+  sweep: {interval_seconds: 4, grid: "4x4", categories: [romantic_affection, revealing_clothing, mature_themes]}
+  localise: {window_minutes_explicit_time: 4, window_minutes_wide: 8, window_fraction_plot_position: 0.10}
+  padding_seconds: 1.0
+  sweep_policy_series: sampled
+  sampled_episodes: 3
+sidecar: {location: both, max_description_chars: 160}
+library: {layout: jellyfin, output_root: ""}

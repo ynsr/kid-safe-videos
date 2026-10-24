@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kidsafe review</title>
+<style>
+:root{color-scheme:light dark}
+body{font-family:system-ui,sans-serif;margin:0;display:flex;height:100vh}
+#left{width:340px;border-right:1px solid var(--border,#ccc);overflow:auto;padding:12px}
+#main{flex:1;display:flex;flex-direction:column;padding:12px;gap:8px;overflow:auto}
+.cand{border:1px solid var(--border,#ccc);border-radius:6px;padding:8px;margin-bottom:8px;cursor:pointer}
+.cand.sel{outline:2px solid #4a90e2}
+.badge{display:inline-block;padding:1px 6px;border-radius:8px;font-size:11px;margin-right:4px}
+.origin{color:#666;font-size:11px}
+video{width:100%;max-height:46vh;background:#000}
+#timeline{height:26px;background:#222;border-radius:4px;position:relative}
+#range{position:absolute;top:0;bottom:0;background:rgba(255,90,0,.55)}
+button{margin:2px;padding:6px 10px}
+input[type=number]{width:90px}
+.warn{color:#b00;font-weight:bold}
+</style>
+</head>
+<body>
+<div id="left">
+<h3>kidsafe review <span id="wid"></span></h3>
+<div id="summary"></div>
+<div style="margin:8px 0">
+<button id="prevBtn">Prev (J)</button>
+<button id="nextBtn">Next (K)</button>
+<button id="pendingBtn">Next pending</button>
+</div>
+<div id="list"></div>
+</div>
+<div id="main">
+<div id="detail"><em>Select a candidate.</em></div>
+<video id="player" controls preload="auto"></video>
+<div id="timeline"><div id="range"></div></div>
+<div>
+<button id="acceptBtn">Accept (A)</button>
+<button id="rejectBtn">Reject (R)</button>
+<button id="playRangeBtn">Play range (Space)</button>
+<button id="playCtxBtn">Play ±5s</button>
+<button id="joinBtn">Play join (3s+3s)</button>
+<button id="buildBtn">Build final video</button>
+<button id="exportBtn">Export sidecar</button>
+</div>
+<div>
+Start <input id="startIn" type="number" step="0.1"> End <input id="endIn" type="number" step="0.1">
+<button id="applyBtn">Apply correction</button>
+<button data-n="-5">-5</button><button data-n="-1">-1</button><button data-n="-0.5">-0.5</button>
+<button data-n="0.5">+0.5</button><button data-n="1">+1</button><button data-n="5">+5</button>
+<button id="setStart">Set start=playhead</button>
+<button id="setEnd">Set end=playhead</button>
+</div>
+<div id="snap"></div>
+<div id="report"></div>
+</div>
+<script>
+const wid = new URLSearchParams(location.search).get('id') || 'default';
+document.getElementById('wid').textContent = wid;
+let state = {cands:[], sel:null, duration:0};
+async function api(m,p,b){
+  const r = await fetch('/api/'+m+'?id='+encodeURIComponent(wid)+(p||''),{method:b?'POST':'GET',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
+  return r.json();
+}
+async function refresh(){
+  const d = await api('state');
+  state.cands = d.candidates||[]; state.duration = d.duration||0;
+  document.getElementById('summary').innerHTML =
+    `<b>${state.cands.length}</b> candidates, pending <b>${state.cands.filter(c=>c.status==='pending').length}</b><br>`+
+    (d.suitability?`Verdict: <b>${d.suitability}</b><br>`:'')+
+    (d.burden?`Removed: ${d.burden.percent_runtime_removed}% (${d.burden.cut_count} cuts) ${d.burden.verdict}<br>`:'')+
+    (d.warnings||[]).map(w=>`<span class="warn">${w}</span>`).join('<br>');
+  const list = document.getElementById('list'); list.innerHTML='';
+  state.cands.forEach((c,i)=>{
+    const el=document.createElement('div'); el.className='cand'+(state.sel===c.id?' sel':'');
+    el.innerHTML=`<span class="badge" style="background:#eee">${c.category||''}</span><span class="badge">${c.decision||c.status||''}</span> <span class="origin">${c.origin||''} ${c.confidence||''}</span><br><b>${c.id}</b> ${fmt(c.start_seconds)} → ${fmt(c.end_seconds)}<br><small>${esc(c.description||'')}</small>`;
+    el.onclick=()=>select(c.id); list.appendChild(el);
+  });
+  if(state.sel) show(state.sel);
+}
+function fmt(s){ s=+s; const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=(s%60).toFixed(1); return `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(4,'0')}`; }
+function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+async function select(id){
+  state.sel=id; const c=state.cands.find(x=>x.id===id);
+  document.querySelectorAll('.cand').forEach((el,i)=>el.classList.toggle('sel',state.cands[i].id===id));
+  show(id);
+  const p=document.getElementById('player');
+  const pr=await api('proxy'); if(pr.url && !p.src) p.src=pr.url+'?id='+encodeURIComponent(wid);
+}
+function show(id){
+  const c=state.cands.find(x=>x.id===id); if(!c) return;
+  document.getElementById('detail').innerHTML=
+    `<b>${c.id}</b> ${fmt(c.start_seconds)} → ${fmt(c.end_seconds)} (${(c.end_seconds-c.start_seconds).toFixed(1)}s)<br>`+
+    `Category: ${esc(c.category||'')} Severity: ${esc(c.severity||'')} Confidence: ${esc(c.confidence||'')}<br>`+
+    (c.source_url?`Source: <a href="${c.source_url}" target="_blank">link</a><br>`:'')+
+    (c.evidence?`Evidence: ${esc(c.evidence)}<br>`:'')+esc(c.description||'')+
+    (c.note?`<br>Note: ${esc(c.note)}`:'');
+  document.getElementById('startIn').value=c.start_seconds;
+  document.getElementById('endIn').value=c.end_seconds;
+  const D=state.duration||1, r=document.getElementById('range');
+  r.style.left=(100*c.start_seconds/D)+'%'; r.style.width=(100*(c.end_seconds-c.start_seconds)/D)+'%';
+  api('snap','&start='+c.start_seconds+'&end='+c.end_seconds).then(s=>{
+    document.getElementById('snap').innerHTML = s.snapped?`Keyframe-snapped cut: <b>${fmt(s.snapped[0])} → ${fmt(s.snapped[1])}</b> (extra ${s.extra}s) `+(s.warnings||[]).map(w=>`<span class="warn">${esc(w)}</span>`).join(' '):'';
+  });
+}
+async function decide(decision){
+  if(!state.sel) return;
+  await api('decide','',{id:state.sel,decision,start:+document.getElementById('startIn').value,end:+document.getElementById('endIn').value});
+  await refresh();
+}
+document.getElementById('acceptBtn').onclick=()=>decide('accepted');
+document.getElementById('rejectBtn').onclick=()=>decide('rejected');
+document.getElementById('applyBtn').onclick=()=>decide('corrected');
+document.getElementById('pendingBtn').onclick=async()=>{const r=await api('next'); if(r.id) select(r.id);};
+document.getElementById('prevBtn').onclick=()=>step(-1);
+document.getElementById('nextBtn').onclick=()=>step(1);
+function step(d){ const i=state.cands.findIndex(c=>c.id===state.sel); const n=state.cands[(i+d+state.cands.length)%state.cands.length]; if(n) select(n.id); }
+function cur(){ const c=state.cands.find(x=>x.id===state.sel); return c; }
+document.getElementById('playRangeBtn').onclick=()=>{const c=cur(); if(!c)return; const p=document.getElementById('player'); p.currentTime=c.start_seconds; p.play(); const stop=()=>{if(p.currentTime>=c.end_seconds){p.pause(); p.removeEventListener('timeupdate',stop);}}; p.addEventListener('timeupdate',stop);};
+document.getElementById('playCtxBtn').onclick=()=>{const c=cur(); if(!c)return; const p=document.getElementById('player'); p.currentTime=Math.max(0,c.start_seconds-5); p.play(); const stop=()=>{if(p.currentTime>=c.end_seconds+5){p.pause(); p.removeEventListener('timeupdate',stop);}}; p.addEventListener('timeupdate',stop);};
+document.getElementById('joinBtn').onclick=async()=>{const c=cur(); if(!c)return; const r=await api('join','&start='+c.start_seconds+'&end='+c.end_seconds); const p=document.getElementById('player'); if(r.url){const v=document.createElement('video'); v.src=r.url; v.controls=true; v.style.width='100%'; document.getElementById('report').prepend(v); v.play();}};
+document.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{const d=+b.dataset.n; const s=document.getElementById('startIn'); s.value=(+s.value+d).toFixed(1);});
+document.getElementById('setStart').onclick=()=>{document.getElementById('startIn').value=document.getElementById('player').currentTime.toFixed(1);};
+document.getElementById('setEnd').onclick=()=>{document.getElementById('endIn').value=document.getElementById('player').currentTime.toFixed(1);};
+document.getElementById('exportBtn').onclick=async()=>{const r=await api('export','',{}); document.getElementById('report').innerHTML='Sidecar: '+esc(r.path||r.error||'ok');};
+document.getElementById('buildBtn').onclick=async()=>{document.getElementById('report').textContent='Building…'; const r=await api('build','',{}); document.getElementById('report').innerHTML='<pre>'+esc(JSON.stringify(r,null,1))+'</pre>'; await refresh();};
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT')return;
+  if(e.key==='a'||e.key==='A')decide('accepted');
+  if(e.key==='r'||e.key==='R')decide('rejected');
+  if(e.key==='j'||e.key==='J')step(-1);
+  if(e.key==='k'||e.key==='K')step(1);
+  if(e.code==='Space'){e.preventDefault();document.getElementById('playRangeBtn').click();}
+});
+refresh();
+</script>
+</body>
+</html>

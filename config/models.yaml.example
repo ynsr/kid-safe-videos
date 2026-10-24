@@ -1,0 +1,27 @@
+# Copy to models.yaml and fill in. Verify exact model IDs and image support on the provider.
+roles:
+  frame_triage:
+    base_url: https://api.example.com/v1
+    model: cheap-vision-model-with-image-input
+    api_key_env: KIDSAFE_TRIAGE_KEY
+    max_tokens: 512
+    timeout: 120
+    image_detail: low
+    training_data_risk: false
+  escalation:
+    base_url: https://api.example.com/v1
+    model: stronger-vision-model-with-image-input
+    api_key_env: KIDSAFE_ESCALATION_KEY
+    max_tokens: 1024
+    timeout: 180
+    image_detail: high
+    training_data_risk: false
+  # Optional third vote. Mark training_data_risk: true when the provider may train on data.
+  # extra_vote:
+  #   base_url: https://api.example.com/v1
+  #   model: third-vision-model
+  #   api_key_env: KIDSAFE_EXTRA_VOTE_KEY
+  #   max_tokens: 512
+  #   timeout: 120
+  #   image_detail: low
+  #   training_data_risk: true

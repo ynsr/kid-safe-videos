@@ -1,112 +1,66 @@
-<p align="center">
-  <img src="static/video-use-banner.png" alt="video-use" width="100%">
-</p>
+# kidsafe
 
-# video-use
+**Fast, lossless cutting of unsafe scenes from cartoons for ages 3+. No blurring, no re-encoding.**
 
-Introducing **video-use** — edit videos with Claude Code. 100% open source.
-
-Drop raw footage in a folder, chat with Claude Code, get `final.mp4` back. Works for any content — talking heads, montages, tutorials, travel, interviews — without presets or menus.
-
-Cloud-hosted video-use is coming. [Join the waitlist at video-use.com](https://video-use.com?utm_source=github).
-
-## What it does
-
-- **Cuts out filler words** (`umm`, `uh`, false starts) and dead space between takes
-- **Auto color grades** every segment (warm cinematic, neutral punch, or any custom ffmpeg chain)
-- **30ms audio fades** at every cut so you never hear a pop
-- **Burns subtitles** in your style — 2-word UPPERCASE chunks by default, fully customizable
-- **Generates animation overlays** via [HyperFrames](https://github.com/heygen-com/hyperframes), [Remotion](https://www.remotion.dev/), [Manim](https://www.manim.community/), or PIL — spawned in parallel sub-agents, one per animation
-- **Self-evaluates the rendered output** at every cut boundary before showing you anything
-- **Persists session memory** in `project.md` so next week's session picks up where you left off
-
-## Setup prompt
-
-Paste into Claude Code, Codex, Hermes, Openclaw, or any agent with shell access:
-
-```text
-Set up https://github.com/browser-use/video-use for me.
-
-Read install.md first to install this repo, wire up ffmpeg, register the skill with whichever agent you're running under, and set up the ElevenLabs API key — ask me to paste it when you need it. Then read SKILL.md for daily usage, and always read helpers/ because that's where the editing scripts live. After install, don't transcribe anything on your own — just tell me it's ready and wait for me to drop footage into a folder.
-```
-
-The agent handles the clone, dependencies, skill registration, and prompts you once for your ElevenLabs API key (grab one at [elevenlabs.io/app/settings/api-keys](https://elevenlabs.io/app/settings/api-keys)).
-
-Then point your agent at a folder of raw takes:
-
-```bash
-cd /path/to/your/videos
-claude    # or codex, hermes, etc.
-```
-
-For always-on editing from your own VPS or Telegram, run the agent through [Browser Use Box](https://browser-use.com/bux). [Watch the 15-second demo](https://www.tiktok.com/@browser_use/video/7639824093721758989).
-
-And in the session:
-
-> edit these into a launch video
-
-It inventories the sources, proposes a strategy, waits for your OK, then produces `edit/final.mp4` next to your sources. All outputs live in `<videos_dir>/edit/` — the skill directory stays clean.
-
-## Manual install
-
-If you'd rather do it by hand:
-
-```bash
-# 1. Clone and symlink into your agent's skills directory
-git clone https://github.com/browser-use/video-use ~/Developer/video-use
-ln -sfn ~/Developer/video-use ~/.claude/skills/video-use        # Claude Code
-# ln -sfn ~/Developer/video-use ~/.codex/skills/video-use       # Codex
-
-# 2. Install deps
-cd ~/Developer/video-use
-uv sync                         # or: pip install -e .
-brew install ffmpeg             # required
-brew install yt-dlp             # optional, for downloading online sources
-
-# 3. Add your ElevenLabs API key
-cp .env.example .env
-$EDITOR .env                    # ELEVENLABS_API_KEY=...
-```
+Parents pick a title, the tool finds candidate unsafe scenes (web research + image-grid vision), a human reviews every finding in a local UI, and accepted ranges are removed with **lossless `ffmpeg -c copy` stream copy only** — keyframe-snapped outward so no unsafe frame survives. A reusable per-video sidecar records everything.
 
 ## How it works
 
-The LLM never watches the video. It **reads** it — through two layers that together give it everything it needs to cut with word-boundary precision.
+1. **Suitability gate** — deterministic hard rules from `rules.yaml` (certifications, genres) block unsuitable titles before spending money; agent research rates dimensions with cited evidence into `suitability.yaml`.
+2. **Research** — the agent writes cited parental-guide entries to `research.yaml` (never timestamps without a source); `validate_research.py` rejects sourceless entries.
+3. **Align + image-grid localisation** — reference times scale to the local file (`align.py`); `frames.py`/`grid.py` build numbered tiles and tile→time maps; `vision.py` asks an OpenAI-compatible vision role strict-JSON questions. Models only ADD flags, never remove; failures count as UNSURE.
+4. **Sweep safety net** — coarse whole-title scan catches what guides miss (mild romance guides rarely list).
+5. **Human review** — local Flask UI (`kidsafe review`) on 127.0.0.1: accept/reject/correct every candidate, set in/out from playhead, play joins, build final.
+6. **Lossless cut + verify + sidecar** — `cut.py` inverts cuts to keep-ranges, snaps outward to keyframes, concat-demuxer stream copy for ALL streams. `verify.py` checks durations and stream preservation. `sidecar.py` writes `<stem>-inappropriate-parts.yml`.
 
-<p align="center">
-  <img src="static/timeline-view.svg" alt="timeline_view composite — filmstrip + speaker track + waveform + word labels + silence-gap cut candidates" width="100%">
-</p>
+## Jellyfin library support
 
-**Layer 1 — Audio transcript (always loaded).** One ElevenLabs Scribe call per source gives word-level timestamps, speaker diarization, and audio events (`(laughter)`, `(applause)`, `(sigh)`). All takes pack into a single ~12KB `takes_packed.md` — the LLM's primary reading view.
+Default layout `Movies/<Name> (<Year>)/…`, `Shows/<Show> (<Year>)/Season NN/…SNNENN…` with `[imdbid-…]/[tmdbid-…]/[tvdbid-…]` tags, multi-version suffixes, multi-part files, multi-episode files, Season 00 specials; extras/trailers ignored. `kidsafe scan <root>` → `library.yaml`; output goes to a **separate mirrored root** (`output_root`), never into the source library — except the sidecar file.
+
+## Cost model
+
+Every paid step shows calls/tokens and asks for confirmation. Cheap `frame_triage` role first, `escalation` only for UNSURE/conflicts, optional `extra_vote`. Series: `sweep_policy: full | sampled(N) | research_only` (default sampled). Costs live in work logs, keyed by grid hash + prompt version + model.
+
+## Review UI
+
+`kidsafe review <id>` — library status, title verdict + evidence, candidate list with category/origin/confidence, proxy player (browsers can't play many source codecs; proxy is UI-only), timeline highlight, Accept (A) / Reject (R) / Next (J/K) / Play range (Space), timing nudges, keyframe-snapped preview, play-join, manual cuts, merge/split, summary bar, per-episode propagation, Build button. Manual-only mode works with no model configured.
+
+## Lossless cutting and the keyframe limitation
+
+Cuts can only land on keyframes without re-encoding. Each cut snaps **outward** (more removed, never less); the report shows extra seconds removed per cut and warns when keyframe gaps exceed the limit. If lossless output is impossible, the tool fails loudly — never falls back silently.
+
+## Configuration
+
+- `config/rules.yaml` — your values (certifications, genres, thresholds, categories, pipeline, sidecar location). The tool encodes them, imposes none.
+- `config/models.yaml` — roles with `base_url`, `model`, `api_key_env`; startup refuses titles marked private to `training_data_risk: true` providers. Verify exact model IDs and image support on the provider.
+- `prompts/*.md` — versioned rubrics (rubric first for prompt caching, strict-JSON answers, no timestamps from models).
+
+## Sidecar file
+
+`<video-stem>-inappropriate-parts.yml` next to the source and/or output (config `sidecar.location`). Built only by `sidecar.py`, never by hand; schema-validated; stale detection by duration ±0.5 s, fps, size, sha256-partial fingerprint; `import-sidecar` replays accepted cuts and keeps rejected parts rejected.
+
+## Privacy
+
+Originals are read-only (sole source write: the sidecar). No local ML models. No audio/speech/dialogue/music analysis. No video to models — images only. Local UI on 127.0.0.1; keys from env vars, never logged or stored.
+
+## Limitations
+
+- No audio, dialogue, or music analysis; video motion is not analysed.
+- Parental guides rarely list mild romance — research alone is never trusted (see sweep).
+- Dub/edit/PAL-speedup timing can shift windows (tool warns beyond 5%).
+- Subtle moments can be missed; verdicts are advice, never a claim of "safe"/"clean".
+- Keyframe gaps may force wider cuts than requested.
+
+## CLI
 
 ```
-## C0103  (duration: 43.0s, 8 phrases)
-  [002.52-005.36] S0 Ninety percent of what a web agent does is completely wasted.
-  [006.08-006.74] S0 We fixed this.
+kidsafe scan <library_root> | init <video> | suitability <id>
+kidsafe validate-research <id> | align <id> | localise <id> | sweep <id>
+kidsafe merge <id> | review [<id>] | cut <id> | cut --manual cuts.yaml <video>
+kidsafe verify <id> | sidecar <id> | import-sidecar <video> | sidecar-status <root>
+kidsafe calibrate <samples> | run <video>
 ```
 
-**Layer 2 — Visual composite (on demand).** `timeline_view` produces a filmstrip + waveform + word labels PNG for any time range. Called only at decision points — ambiguous pauses, retake comparisons, cut-point sanity checks.
+## Credits
 
-> Naive approach: 30,000 frames × 1,500 tokens = **45M tokens of noise**.
-> Video Use: **12KB text + a handful of PNGs**.
-
-Same idea as browser-use giving an LLM a structured DOM instead of a screenshot — but for video.
-
-## Pipeline
-
-```
-Transcribe ──> Pack ──> LLM Reasons ──> EDL ──> Render ──> Self-Eval
-                                                              │
-                                                              └─ issue? fix + re-render (max 3)
-```
-
-The self-eval loop runs `timeline_view` on the _rendered output_ at every cut boundary — catches visual jumps, audio pops, hidden subtitles. You see the preview only after it passes.
-
-## Design principles
-
-1. **Text + on-demand visuals.** No frame-dumping. The transcript is the surface.
-2. **Audio is primary, visuals follow.** Cuts come from speech boundaries and silence gaps.
-3. **Ask → confirm → execute → self-eval → persist.** Never touch the cut without strategy approval.
-4. **Zero assumptions about content type.** Look, ask, then edit.
-5. **12 hard rules, artistic freedom elsewhere.** Production-correctness is non-negotiable. Taste isn't.
-
-See [`SKILL.md`](./SKILL.md) for the full production rules and editing craft.
+Fork of [browser-use/video-use](https://github.com/browser-use/video-use), rewritten for lossless cartoon cutting.
