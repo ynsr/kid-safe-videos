@@ -22,7 +22,8 @@ Never write timestamps without a source.
 5. `kidsafe validate-research work/<id>/research.yaml` — fix every error.
 6. `kidsafe align <id>` — note scale warnings; add `landmarks` to
    `context.yaml` (1–3 guide/local pairs) if dub/edit drift is known, re-run.
-7. `kidsafe localise <id>` (assisted by scripts) then `kidsafe sweep <id>`
+7. `kidsafe localise <id>` (two-stage vision per window: triage then refine;
+   UNSURE widens, never drops), then `kidsafe sweep <id>`
    (default ON; `--skip` only with explicit human approval + reason).
 8. `kidsafe merge <id>` — inspect `candidates.yaml`.
 9. `kidsafe review <id>` — human reviews every candidate; decisions persist to

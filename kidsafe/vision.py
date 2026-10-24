@@ -157,7 +157,11 @@ def query_grid(grid_image: Path, tiles: dict, prompt_template: str, subs: dict,
                             encode_image_b64(grid_image), rc.max_tokens,
                             rc.timeout, rc.image_detail)
     obj = parse_strict_json(text)
-    norm = normalise_triage(obj, {int(k) for k in tiles})
+    tileset = {int(k) for k in tiles}
+    if role == "grid_refine":
+        norm = normalise_refine(obj, tileset)
+    else:
+        norm = normalise_triage(obj, tileset)
     rec = {"model": rc.model, "role": role,
            "prompt_version": prompt_version(prompt_template),
            "raw": text[:4000], "parsed": norm, "usage": usage, "_cache": "miss"}
@@ -169,6 +173,26 @@ def query_grid(grid_image: Path, tiles: dict, prompt_template: str, subs: dict,
         with open(log_path, "a") as f:
             f.write(line)
     return rec
+
+def normalise_refine(obj: dict | None, valid_tiles: set[int]) -> dict:
+    """Refine output -> first/last tile; failures widen (UNSURE)."""
+    if not isinstance(obj, dict):
+        return {"first_tile": None, "last_tile": None, "answer": "UNSURE",
+                "reason": "unparseable refine output", "_parse": "UNSURE-fallback"}
+    def _tile(v):
+        try:
+            t = int(v)
+        except (TypeError, ValueError):
+            return None
+        return t if t in valid_tiles else None
+    ans = str(obj.get("answer", "UNSURE")).upper()
+    if ans not in ("YES", "NO", "UNSURE"):
+        ans = "UNSURE"
+    first, last = _tile(obj.get("first_tile")), _tile(obj.get("last_tile"))
+    if first is not None and last is not None and last < first:
+        first, last = last, first
+    return {"first_tile": first, "last_tile": last, "answer": ans,
+            "reason": str(obj.get("reason", ""))[:200]}
 
 
 def union_votes(results: list[dict]) -> dict:

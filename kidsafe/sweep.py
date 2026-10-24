@@ -54,12 +54,23 @@ def sweep_title(video: Path, work_dir: Path, config_dir: Path,
     cache_dir = work_dir / "vision_cache"
     log_path = work_dir / "logs" / "vision_calls.jsonl"
     hits: list[dict] = []
+    has_escalation = "escalation" in cfg.roles
+    escalate_t = (prompt_dir / "grid_refine.md").read_text() if has_escalation else None
     for g in grids:
         tiles = {int(k): float(v) for k, v in g["tiles"].items()}
         subs = {"categories": names, "category_definitions": defs, "context_block": ""}
+        subs["description"] = f"sweep triage over {names}"
         rec = vision_mod.query_grid(Path(g["image"]), tiles, prompt_t, subs,
                                     "frame_triage", config_dir, cache_dir, log_path)
-        for f in rec["parsed"]["flagged"]:
+        flagged = rec["parsed"]["flagged"]
+        unsure = [f for f in flagged if f.get("answer") == "UNSURE"]
+        if unsure and has_escalation:
+            erec = vision_mod.query_grid(Path(g["image"]), tiles, escalate_t, subs,
+                                         "escalation", config_dir, cache_dir, log_path)
+            votes = vision_mod.union_votes([rec, erec])
+            flagged = [f for f in flagged + erec["parsed"].get("flagged", [])
+                       if f["tile"] in votes["flagged_tiles"]]
+        for f in flagged:
             t = tiles[f["tile"]]
             hits.append({"time": t, "grid": Path(g["image"]).name,
                          "tile": f["tile"], "category": f["category"],

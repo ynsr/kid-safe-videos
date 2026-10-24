@@ -256,7 +256,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("localise"); p.add_argument("id")
     p.add_argument("--config", type=Path, default=Path("config"))
-    p.set_defaults(f=lambda a: print("localise runs vision.py over windows.yaml; agent-assisted, see AGENTS.md"))
+    def _localise(a):
+        from .localise import localise_title
+        wd = Path("work") / a.id
+        ctx = load_yaml(wd / "context.yaml")
+        video = Path(ctx["video"])
+        rec = localise_title(video, wd, a.config, Path("prompts"))
+        print(f"localise windows={rec['windows']} hits={len(rec['hits'])} -> {wd}/localise.yaml")
+    p.set_defaults(f=_localise)
 
     p = sub.add_parser("sweep"); p.add_argument("id")
     p.add_argument("--config", type=Path, default=Path("config"))
